@@ -1,0 +1,6 @@
+# --- Core Terminal UI & Cryptography ---
+rich>=13.7.0
+cryptography>=41.0.0
+
+# --- Post-Quantum Cryptography Engine ---
+liboqs-python>=0.12.0

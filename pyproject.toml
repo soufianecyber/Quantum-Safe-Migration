@@ -1,0 +1,83 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantum-safe-migration"
+version = "1.0.0"
+description = "Enterprise post-quantum cryptography migration and auditing toolkit."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Soufiane Cyber", email = "soufiane.cyber.mail@gmail.com" },
+]
+keywords = [
+    "post-quantum",
+    "cryptography",
+    "security",
+    "nist",
+    "kyber",
+    "dilithium",
+    "ml-kem",
+    "ml-dsa",
+    "hndl",
+    "devsecops",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security :: Cryptography",
+    "Topic :: System :: Systems Administration",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "rich>=13.7.0",
+    "cryptography>=41.0.0",
+]
+
+[project.optional-dependencies]
+pqc = ["liboqs-python>=0.12.0"]
+dev = [
+    "pytest>=7.4.0",
+    "black>=24.0.0",
+    "mypy>=1.8.0",
+    "ruff>=0.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/soufianecyber/Quantum-Safe-Migration"
+Repository = "https://github.com/soufianecyber/Quantum-Safe-Migration"
+Issues = "https://github.com/soufianecyber/Quantum-Safe-Migration/issues"
+Changelog = "https://github.com/soufianecyber/Quantum-Safe-Migration/blob/main/CHANGELOG.md"
+Security = "https://github.com/soufianecyber/Quantum-Safe-Migration/blob/main/SECURITY.md"
+
+[project.scripts]
+qsm = "qsm:main"
+
+[tool.setuptools]
+py-modules = ["qsm"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310", "py311", "py312", "py313"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_configs = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
