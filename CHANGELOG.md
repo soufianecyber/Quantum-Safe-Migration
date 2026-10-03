@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.0] — 2026-XX-XX
+## [1.0.0] — 2026-10-03
 
 ### Added
 - Initial public release 🎉
@@ -60,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hybrid enforcement invariant: pure PQC is architecturally forbidden
 - All system file modifications are atomic and reversible
 - Checksum validation prevents corrupted rollbacks
+
+### Verified
+
+- ✅ Tested on Parrot OS Security (kernel 7.1.13+parrot7-amd64)
+- ✅ Python 3.13.5 · OpenSSL 3.5.7 · liboqs-python 0.12+
+- ✅ Real-world migration test on Nginx 1.26.3 (`/etc/nginx/nginx.conf`)
+- ✅ Checksum-verified rollback restores original state byte-for-byte
+- ✅ 17/17 unit tests passing
 
 ---
 

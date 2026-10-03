@@ -1,5 +1,11 @@
 # 🌌 Quantum-Safe Migration (QSM)
 
+<div align="center">
+  <img src="docs/screenshots/banner.png" alt="QSM Banner" width="800">
+</div>
+
+---
+
 ![Python Version](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green?logo=opensourceinitiative&logoColor=white)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Debian-orange?logo=linux&logoColor=white)
@@ -10,10 +16,6 @@
 ![Kyber](https://img.shields.io/badge/Kyber768-ML--KEM-9cf)
 ![Dilithium](https://img.shields.io/badge/Dilithium3-ML--DSA-9cf)
 ![Code Style](https://img.shields.io/badge/code%20style-black-000000?logo=python&logoColor=white)
-
----
-
-**Enterprise-Grade Post-Quantum Cryptography Migration & Security Auditing Platform.**
 
 ---
 
@@ -98,6 +100,40 @@ Distributed under the **MIT License**. See `LICENSE` for details.
 - [Open Quantum Safe](https://openquantumsafe.org/) for `liboqs`
 - [NIST PQC Project](https://csrc.nist.gov/projects/post-quantum-cryptography) for FIPS 203/204
 - [Shields.io](https://shields.io) for badge infrastructure
+
+---
+
+## 📸 Screenshots
+
+### 1. Pre-Flight System Check
+
+```bash
+sudo python3 qsm.py --preflight
+```
+
+![Pre-Flight Check](docs/screenshots/1.png)
+
+*Validates Python version, liboqs bindings, Kyber/Dilithium availability, and OpenSSL.*
+
+### 2. Quantum Vulnerability Assessment
+
+```bash
+python3 qsm.py --simulate --target google.com
+```
+
+![Simulation](docs/screenshots/2.png)
+
+*Detects ECC-256 on google.com and computes Shor's Algorithm time-to-crack.*
+
+### 3. Hybrid PQC Migration (Dry-Run)
+
+```bash
+sudo python3 qsm.py --migrate --target nginx --config /etc/nginx/nginx.conf --dry-run
+```
+
+![Dry-Run Migration](docs/screenshots/3.png)
+
+*Preview of hybrid cipher suite injection — no files modified.*
 
 ---
 
