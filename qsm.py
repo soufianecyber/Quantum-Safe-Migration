@@ -5,7 +5,7 @@ Quantum-Safe Migration (QSM) — A Post-Quantum Cryptography Migration Toolkit.
 A functional proof-of-concept for auditing and migrating legacy cryptographic
 configurations to hybrid post-quantum cryptography (PQC).
 
-⚠️  Status: Active development (v1.0.1). Not yet battle-tested in production.
+    Status: Active development (v1.0.1). Not yet battle-tested in production.
     See README "Limitations & Honest Disclosure" for scope and constraints.
 
 Author: Soufiane Cyber (@soufianecyber)

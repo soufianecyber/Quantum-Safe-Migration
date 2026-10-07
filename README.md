@@ -37,7 +37,7 @@ Algorithm impact and automating hybrid migrations on Debian-based systems.
 
 ---
 
-## ⚠️ Limitations & Honest Disclosure
+## ⚠️ Limitations
 
 QSM is a **functional proof-of-concept**, not a certified production tool.
 Please read this section carefully before relying on it in critical
