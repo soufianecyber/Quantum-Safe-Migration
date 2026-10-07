@@ -143,7 +143,7 @@ def test_hybrid_enforcement_blocks_pure_pqc(tmp_path):
     """Pure PQC config must be rejected by the hybrid guard."""
     # ... setup
     with pytest.raises(MigrationError, match="Hybrid enforcement violated"):
-        migrator._assert_hybrid_enforced("Kyber768 only content", "nginx")
+        migrator._assert_hybrid_enforced("ML-KEM-768 only content", "nginx")
 ```
 
 ---

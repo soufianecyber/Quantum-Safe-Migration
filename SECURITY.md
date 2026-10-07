@@ -25,8 +25,8 @@ operates on cryptographic infrastructure.
 
 **Option 1 — GitHub Private Vulnerability Reporting (Preferred):**
 
-Navigate to the [Security tab](../../security/advisories/new) of this
-repository and submit a private advisory.
+Navigate to the [Security tab](https://github.com/soufianecyber/Quantum-Safe-Migration/security/advisories/new)
+of this repository and submit a private advisory.
 
 **Option 2 — Email:**
 
@@ -66,7 +66,7 @@ To help us triage quickly, please include:
 **Out of Scope:**
 - Vulnerabilities in dependencies (`rich`, `cryptography`, `liboqs`)
   — please report upstream
-- Theoretical attacks on Kyber/Dilithium algorithms themselves
+- Theoretical attacks on ML-KEM / ML-DSA algorithms themselves
   — please contact NIST
 - Misconfigurations by the user
 - Issues requiring physical access to the machine

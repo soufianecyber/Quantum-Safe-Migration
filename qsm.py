@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
-Quantum-Safe Migration (QSM) — Enterprise Post-Quantum Cryptography Migration Toolkit.
+Quantum-Safe Migration (QSM) — A Post-Quantum Cryptography Migration Toolkit.
 
-A production-grade CLI tool for auditing and migrating legacy cryptographic
+A functional proof-of-concept for auditing and migrating legacy cryptographic
 configurations to hybrid post-quantum cryptography (PQC).
+
+⚠️  Status: Active development (v1.0.1). Not yet battle-tested in production.
+    See README "Limitations & Honest Disclosure" for scope and constraints.
 
 Author: Soufiane Cyber (@soufianecyber)
 Copyright: (c) 2026 Soufiane Cyber
 License: MIT
-Version: 1.0.0
+Version: 1.0.1
 Repository: https://github.com/soufianecyber/Quantum-Safe-Migration
 
 WARNING: This tool is intended for authorized security testing and migration
@@ -23,6 +26,7 @@ import hashlib
 import os
 import platform
 import re
+import secrets
 import shutil
 import socket
 import ssl
@@ -57,8 +61,9 @@ except ImportError:
     sys.exit(1)
 
 
-QSM_VERSION = "1.0.0"
+QSM_VERSION = "1.0.1"
 MIN_PYTHON = (3, 10)
+MAX_CONFIG_SIZE = 10 * 1024 * 1024
 
 console = Console()
 
@@ -164,19 +169,21 @@ class PreFlightChecker:
             import oqs
 
             kems = oqs.get_enabled_kem_mechanisms()
-            kyber_ok = any(
-                m.lower().startswith(("kyber768", "ml-kem-768"))
+            kem_ok = any(
+                m.lower().startswith(
+                    ("kyber768", "ml-kem-768", "mlkem768")
+                )
                 for m in kems
             )
             return PreFlightResult(
-                name="Kyber/ML-KEM Support",
+                name="ML-KEM / Kyber Support",
                 value=f"{len(kems)} KEMs available",
-                passed=kyber_ok,
-                detail="Kyber768 / ML-KEM-768 required for hybrid key exchange",
+                passed=kem_ok,
+                detail="ML-KEM-768 (FIPS 203) required for hybrid key exchange",
             )
         except Exception as exc:
             return PreFlightResult(
-                name="Kyber/ML-KEM Support",
+                name="ML-KEM / Kyber Support",
                 value="unavailable",
                 passed=False,
                 detail=str(exc),
@@ -187,19 +194,21 @@ class PreFlightChecker:
             import oqs
 
             sigs = oqs.get_enabled_sig_mechanisms()
-            dilithium_ok = any(
-                m.lower().startswith(("dilithium3", "ml-dsa-65"))
+            sig_ok = any(
+                m.lower().startswith(
+                    ("dilithium3", "ml-dsa-65", "mldsa65")
+                )
                 for m in sigs
             )
             return PreFlightResult(
-                name="Dilithium/ML-DSA Support",
+                name="ML-DSA / Dilithium Support",
                 value=f"{len(sigs)} SIGs available",
-                passed=dilithium_ok,
-                detail="Dilithium3 / ML-DSA-65 required for hybrid auth",
+                passed=sig_ok,
+                detail="ML-DSA-65 (FIPS 204) required for hybrid auth",
             )
         except Exception as exc:
             return PreFlightResult(
-                name="Dilithium/ML-DSA Support",
+                name="ML-DSA / Dilithium Support",
                 value="unavailable",
                 passed=False,
                 detail=str(exc),
@@ -235,17 +244,41 @@ class PreFlightChecker:
             )
 
     def _check_write_permission(self) -> PreFlightResult:
-        targets = [Path("/etc/nginx"), Path("/etc/ssh")]
-        writable_dirs = [t for t in targets if t.exists() and os.access(t, os.W_OK)]
-        if writable_dirs:
-            value = f"Yes ({', '.join(str(d) for d in writable_dirs)})"
+        """
+        Check whether the calling user can write to the target config files
+        (not just their parent directories).
+        """
+        target_files = [
+            Path("/etc/nginx/nginx.conf"),
+            Path("/etc/ssh/sshd_config"),
+        ]
+
+        writable: List[str] = []
+        denied: List[str] = []
+        missing: List[str] = []
+
+        for target in target_files:
+            if not target.exists():
+                missing.append(str(target))
+                continue
+            if os.access(target, os.W_OK):
+                writable.append(str(target))
+            else:
+                denied.append(str(target))
+
+        if writable:
+            value = f"Yes ({len(writable)} file(s) writable)"
+            passed = True
+        elif os.geteuid() == 0 and not denied:
+            value = "Root (all targets writable)"
             passed = True
         elif os.geteuid() == 0:
-            value = "Root (no target dirs found)"
-            passed = True
-        else:
-            value = "No (run as root for --migrate)"
+            value = f"Root ({len(denied)} denied)"
             passed = False
+        else:
+            value = f"No ({len(denied)} denied, {len(missing)} missing)"
+            passed = False
+
         return PreFlightResult(
             name="Config Write Permission",
             value=value,
@@ -287,8 +320,8 @@ class PreFlightChecker:
             if not r.passed and r.name in (
                 "Python Version",
                 "liboqs-python Bindings",
-                "Kyber/ML-KEM Support",
-                "Dilithium/ML-DSA Support",
+                "ML-KEM / Kyber Support",
+                "ML-DSA / Dilithium Support",
             ):
                 all_critical_pass = False
 
@@ -319,8 +352,11 @@ class QuantumSimulator:
     """
     Simulates Shor's Algorithm attacks against classical cryptography
     and provides HNDL risk scoring.
-    """
 
+    ⚠️  The time-to-crack figure is produced by a SIMPLIFIED analytical
+    model (see _compute_shor_metrics docstring). It is intended for
+    relative risk comparison, not as a prediction on any existing machine.
+    """
 
     def __init__(self, verbose: bool = False) -> None:
         self.verbose = verbose
@@ -420,6 +456,7 @@ class QuantumSimulator:
                         key_size=self._kex_size(kex_algo),
                         location=f"TLS {version}",
                         is_hybrid=kex_algo.startswith("X25519+")
+                        or "ML-KEM" in kex_algo
                         or "Kyber" in kex_algo,
                     )
                 )
@@ -480,8 +517,8 @@ class QuantumSimulator:
     @staticmethod
     def _classify_kex(cipher_name: str) -> str:
         upper = cipher_name.upper()
-        if "KYBER" in upper or "MLKEM" in upper or "ML-KEM" in upper:
-            return "X25519+Kyber768"
+        if "MLKEM" in upper or "ML-KEM" in upper or "KYBER" in upper:
+            return "X25519+ML-KEM-768"
         if "X25519" in upper:
             return "X25519"
         if "ECDHE" in upper and "P256" in upper:
@@ -496,7 +533,7 @@ class QuantumSimulator:
 
     @staticmethod
     def _kex_size(algo: str) -> int:
-        if "X25519" in algo and "Kyber" in algo:
+        if "X25519" in algo and ("ML-KEM" in algo or "Kyber" in algo):
             return 768
         if "X25519" in algo:
             return 256
@@ -633,7 +670,7 @@ class QuantumSimulator:
         if asset.is_hybrid or asset.is_quantum_safe:
             return "[green]🟢 HYBRID-READY[/green]"
         algo_upper = asset.algorithm.upper()
-        if "KYBER" in algo_upper or "DILITHIUM" in algo_upper or "ML-" in algo_upper:
+        if "ML-KEM" in algo_upper or "ML-DSA" in algo_upper or "KYBER" in algo_upper or "DILITHIUM" in algo_upper:
             return "[green]🟢 QUANTUM-SAFE[/green]"
         if "RSA" in algo_upper and asset.key_size >= 4096:
             return "[yellow]🟠 HIGH RISK[/yellow]"
@@ -760,11 +797,25 @@ class QuantumSimulator:
 
     def _compute_shor_metrics(self, asset: CryptoAsset) -> Dict[str, Any]:
         """
-        Compute theoretical Shor's algorithm metrics.
+        Compute theoretical Shor's algorithm metrics — SIMPLIFIED MODEL.
 
-        Formula:
-            T_crack = (Gate_Operations × Physical_Qubits) /
-                      (Logical_Clock_Rate × Parallelism_Factor)
+        ⚠️  DISCLAIMER: This is an analytical approximation, not a
+        compiled quantum circuit simulation. The formulas used are:
+
+            Gate_Operations   = bits³                      (O(n³) model)
+            Logical_Qubits    = 2 × bits + 2
+            Physical_Qubits   = Logical_Qubits × 1000      (surface code)
+            Clock_Rate        = 1 MHz                      (conservative)
+            T_crack           = (Gate_Ops × Physical_Qubits) / Clock_Rate
+
+        Real-world CRQC resource estimates depend on circuit depth, gate
+        fidelity, error-correction overhead, and hardware-specific parameters.
+        Output figures are ORDER-OF-MAGNITUDE estimates for relative risk
+        comparison, NOT precise predictions of any existing machine.
+
+        Reference context: published 2026 estimates place a fault-tolerant
+        break of ECC-256 at ~10k-20k physical qubits and days-to-weeks of
+        runtime — well beyond current hardware.
         """
         algo_upper = asset.algorithm.upper()
         n = asset.key_size if asset.key_size else 2048
@@ -793,11 +844,8 @@ class QuantumSimulator:
             formula = f"O((log N)^3) ≈ {bits}^3 ≈ {bits**3:,} gate operations"
 
         physical_qubits = logical_qubits * 1000
-
         gate_ops = bits ** 3
-
         clock_hz = 1_000_000
-
         parallelism = 1
 
         crack_seconds = (gate_ops * physical_qubits) / (clock_hz * parallelism)
@@ -834,7 +882,7 @@ class QuantumSimulator:
             return "CRITICAL"
 
         if seconds < 3600:
-                return "CRITICAL"
+            return "CRITICAL"
         if seconds < 86400:
             return "HIGH"
         if seconds < 86400 * 30:
@@ -865,7 +913,13 @@ class QuantumSimulator:
         Return (score 0-100, severity, recommendation).
         """
         algo_upper = asset.algorithm.upper()
-        if asset.is_hybrid or "KYBER" in algo_upper or "DILITHIUM" in algo_upper:
+        if (
+            asset.is_hybrid
+            or "ML-KEM" in algo_upper
+            or "ML-DSA" in algo_upper
+            or "KYBER" in algo_upper
+            or "DILITHIUM" in algo_upper
+        ):
             return (5, "LOW", "Maintain; monitor PQC standards")
 
         if "RSA" in algo_upper:
@@ -879,7 +933,7 @@ class QuantumSimulator:
             return (90, "CRITICAL", "Immediate hybrid migration required")
 
         if "X25519" in algo_upper:
-            return (40, "MEDIUM", "Complete hybrid migration (add Kyber768)")
+            return (40, "MEDIUM", "Complete hybrid migration (add ML-KEM-768)")
 
         return (60, "MEDIUM", "Perform full cryptographic inventory")
 
@@ -915,6 +969,19 @@ class HybridMigrator:
             raise MigrationError(f"Configuration file not found: {path}")
         if not path.is_file():
             raise MigrationError(f"Configuration path is not a file: {path}")
+
+        if path.is_symlink():
+            raise MigrationError(
+                f"Refusing to migrate symlink: {path}\n"
+                f"Resolve it manually first: readlink -f {path}"
+            )
+
+        size = path.stat().st_size
+        if size > MAX_CONFIG_SIZE:
+            raise MigrationError(
+                f"Config file too large: {size} bytes "
+                f"(max {MAX_CONFIG_SIZE // 1024 // 1024} MB)"
+            )
 
         original = path.read_text(encoding="utf-8", errors="replace")
 
@@ -967,19 +1034,37 @@ class HybridMigrator:
     def _assert_hybrid_enforced(self, content: str, target: str) -> None:
         """
         Architectural guard: the generated configuration MUST contain BOTH
-        classical AND post-quantum algorithm markers.
+        classical AND post-quantum algorithm markers, in ACTIVE (non-comment)
+        directives.
 
-        This enforces QSM's core security invariant — pure PQC or pure
-        classical configurations are architecturally forbidden.
+        Uses regex with word boundaries to avoid false positives where a
+        classical algorithm name (e.g., "x25519") appears as a substring
+        of a PQC identifier (e.g., "X25519MLKEM768").
         """
         invariants = {
             "nginx": {
-                "classical": ("ECDHE-ECDSA", "X25519"),
-                "pqc": ("Kyber", "Dilithium"),
+                "classical": (
+                    r"ecdhe-ecdsa",
+                    r"(?<![a-z0-9])x25519(?![a-z0-9])",
+                ),
+                "pqc": (
+                    r"ml-kem",
+                    r"mlkem",
+                    r"kyber",
+                    r"ml-dsa",
+                    r"mldsa",
+                    r"dilithium",
+                ),
             },
             "sshd": {
-                "classical": ("curve25519",),
-                "pqc": ("sntrup761", "mlkem"),
+                "classical": (
+                    r"(?<![a-z0-9])curve25519(?![a-z0-9])",
+                ),
+                "pqc": (
+                    r"sntrup761",
+                    r"mlkem",
+                    r"ml-kem",
+                ),
             },
         }
         rules = invariants.get(target)
@@ -988,14 +1073,52 @@ class HybridMigrator:
                 f"No hybrid invariants defined for target '{target}'."
             )
 
-        lower_content = content.lower()
-        for category, tokens in rules.items():
-            if not any(tok.lower() in lower_content for tok in tokens):
+        active_lines = [
+            line for line in content.splitlines()
+            if not line.strip().startswith("#")
+        ]
+        effective_content = "\n".join(active_lines).lower()
+
+        for category, patterns in rules.items():
+            if not any(
+                re.search(pat, effective_content) for pat in patterns
+            ):
+                clean_names = [p.replace(r"(?<![a-z0-9])", "").replace(r"(?![a-z0-9])", "")
+                               for p in patterns]
                 raise MigrationError(
                     f"Hybrid enforcement violated for '{target}': "
-                    f"missing {category} algorithm marker "
-                    f"(expected one of: {', '.join(tokens)})."
+                    f"missing active {category} algorithm marker "
+                    f"(expected one of: {', '.join(clean_names)})."
                 )
+
+    @staticmethod
+    def _get_pqc_group_name() -> str:
+        """
+        Select the appropriate PQC group name based on the installed
+        OpenSSL version.
+
+        - OpenSSL >= 3.5: "X25519MLKEM768" (IETF standardized name)
+        - OpenSSL 3.2-3.4: "X25519Kyber768Draft00" (draft name)
+        - Fallback: draft name for maximum compatibility
+        """
+        try:
+            out = subprocess.run(
+                ["openssl", "version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            m = re.search(r"OpenSSL\s+(\d+)\.(\d+)", out.stdout)
+            if m:
+                major, minor = int(m.group(1)), int(m.group(2))
+                if (major, minor) >= (3, 5):
+                    return "X25519MLKEM768"
+                elif (major, minor) >= (3, 2):
+                    return "X25519Kyber768Draft00"
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        return "X25519Kyber768Draft00"
 
     def _build_nginx_config(
         self, original: str
@@ -1007,12 +1130,12 @@ class HybridMigrator:
             (
                 "Auth Algorithm",
                 "RSA-2048 (legacy)",
-                "ECDSA-P256 + Dilithium3",
+                "ECDSA-P256 + ML-DSA-65 (FIPS 204)",
             ),
             (
                 "Key Exchange",
                 "X25519",
-                "X25519 + Kyber768",
+                "X25519 + ML-KEM-768 (FIPS 203)",
             ),
             (
                 "Cipher Suite",
@@ -1023,21 +1146,21 @@ class HybridMigrator:
             ("Quantum Security", "0 bits", "128+ bits"),
         ]
 
-        timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        pqc_group = self._get_pqc_group_name()
         block = [
             "",
             self.HYBRID_MARKER,
             f"# Generated: {timestamp}",
             "# Classical: ECDSA-P256 + X25519",
-            "# Quantum-Safe: Dilithium3 + Kyber768",
+            "# Quantum-Safe: ML-DSA-65 (FIPS 204) + ML-KEM-768 (FIPS 203)",
             "",
             "ssl_ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305';",
             "ssl_ecdh_curve 'X25519:prime256v1';",
-            "ssl_protocols TLSv1.3;",
             "",
             "# Post-Quantum Hybrid Groups (requires oqs-provider)",
-            'ssl_conf_command Groups "X25519Kyber768Draft00:X25519:P-256";',
-            'ssl_conf_command SignatureAlgorithms "ecdsa_secp256r1_sha256:dilithium3";',
+            f'ssl_conf_command Groups "{pqc_group}:X25519:P-256";',
+            'ssl_conf_command SignatureAlgorithms "ecdsa_secp256r1_sha256:mldsa65";',
             self.HYBRID_MARKER_END,
             "",
         ]
@@ -1103,7 +1226,7 @@ class HybridMigrator:
             ("Quantum Security", "0 bits", "128+ bits"),
         ]
 
-        timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         block = [
             "",
             self.HYBRID_MARKER,
@@ -1118,7 +1241,7 @@ class HybridMigrator:
             "ssh-ed25519-cert-v01@openssh.com",
             "",
             "# Post-Quantum Ready (requires OpenSSH 9.0+ with OQS support)",
-            "# KexAlgorithms mlkem768x25519-sha256",
+            "# KexAlgorithms mlkem768x25519-sha256 (when available)",
             self.HYBRID_MARKER_END,
             "",
         ]
@@ -1147,12 +1270,35 @@ class HybridMigrator:
         return out
 
     def _create_backup(self, path: Path) -> Path:
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        if path.is_symlink():
+            raise MigrationError(
+                f"Refusing to back up symlink: {path}\n"
+                f"Resolve manually: readlink -f {path}"
+            )
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         backup = path.with_name(path.name + f".bak.{timestamp}")
-        shutil.copy2(path, backup)
+
+        if backup.exists():
+            backup = path.with_name(
+                path.name + f".bak.{timestamp}.{secrets.token_hex(4)}"
+            )
+
+        shutil.copy2(path, backup, follow_symlinks=False)
+
+        try:
+            os.chmod(backup, 0o600)
+        except (OSError, PermissionError):
+            pass
+
         checksum = _sha256_file(backup)
         sidecar = backup.with_suffix(backup.suffix + ".sha256")
         sidecar.write_text(checksum + "\n", encoding="utf-8")
+        try:
+            os.chmod(sidecar, 0o600)
+        except (OSError, PermissionError):
+            pass
+
         if self.verbose:
             console.print(f"[dim]  backup: {backup}[/dim]")
         return backup
@@ -1173,24 +1319,31 @@ class HybridMigrator:
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
         directory = path.parent
-        fd, tmp_name = tempfile.mkstemp(
-            prefix=path.name + ".", dir=str(directory)
-        )
+        tmp_name = directory / f".{path.name}.qsm.{secrets.token_hex(8)}.tmp"
+
         try:
+            fd = os.open(
+                tmp_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(content)
                 fh.flush()
                 os.fsync(fh.fileno())
+
             try:
                 st = os.stat(path)
                 os.chmod(tmp_name, st.st_mode)
                 os.chown(tmp_name, st.st_uid, st.st_gid)
             except (OSError, PermissionError):
                 pass
+
             os.replace(tmp_name, path)
         except Exception:
             try:
-                os.unlink(tmp_name)
+                if tmp_name.exists():
+                    os.unlink(tmp_name)
             except OSError:
                 pass
             raise
@@ -1204,6 +1357,17 @@ class HybridMigrator:
             console.print(f"[red]✗ Validation error: {exc}[/red]")
             return False
 
+    @staticmethod
+    def _check_safe_path(path: Path) -> str:
+        """Validate path before passing it to a subprocess."""
+        path_str = str(path)
+        if not path_str.startswith("/"):
+            raise MigrationError(f"Config path must be absolute: {path_str}")
+        forbidden = (";", "|", "&", "`", "$", "\n", "\r")
+        if any(c in path_str for c in forbidden):
+            raise MigrationError(f"Invalid characters in path: {path_str}")
+        return path_str
+
     def _validate_nginx(self, path: Path) -> bool:
         nginx = shutil.which("nginx")
         if nginx is None:
@@ -1213,9 +1377,10 @@ class HybridMigrator:
                     "validation.[/yellow]"
                 )
             return True
+        path_str = self._check_safe_path(path)
         try:
             result = subprocess.run(
-                [nginx, "-t", "-c", str(path)],
+                [nginx, "-t", "-c", path_str],
                 capture_output=True,
                 text=True,
                 timeout=15,
@@ -1236,9 +1401,10 @@ class HybridMigrator:
                     "validation.[/yellow]"
                 )
             return True
+        path_str = self._check_safe_path(path)
         try:
             result = subprocess.run(
-                [sshd, "-t", "-f", str(path)],
+                [sshd, "-t", "-f", path_str],
                 capture_output=True,
                 text=True,
                 timeout=15,
@@ -1336,19 +1502,46 @@ class RollbackEngine:
         self.verbose = verbose
 
     def list_backups(self, target: Path) -> List[Path]:
+        """
+        Enumerate QSM backups for a given target file.
+
+        Rejects symlinks and sidecar checksum files to prevent
+        privilege-escalation attacks during rollback.
+        """
         if not target.exists():
             raise MigrationError(f"Target not found: {target}")
+
         parent = target.parent
         pattern = target.name + ".bak.*"
-        candidates = sorted(
-            parent.glob(pattern),
+
+        candidates: List[Path] = []
+        for candidate in parent.glob(pattern):
+            if candidate.name.endswith(".sha256"):
+                continue
+            if candidate.is_symlink():
+                if self.verbose:
+                    console.print(
+                        f"[yellow]⚠ Skipping symlink: {candidate}[/yellow]"
+                    )
+                continue
+            try:
+                st = candidate.stat()
+                if os.geteuid() == 0 or st.st_uid == os.geteuid():
+                    candidates.append(candidate)
+            except OSError:
+                continue
+
+        return sorted(
+            candidates,
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
-        return [c for c in candidates if not c.name.endswith(".sha256")]
 
     def restore(
-        self, target: Path, backup: Optional[Path] = None, timestamp: Optional[str] = None
+        self,
+        target: Path,
+        backup: Optional[Path] = None,
+        timestamp: Optional[str] = None,
     ) -> None:
         if not target.exists():
             raise MigrationError(f"Target not found: {target}")
@@ -1426,7 +1619,9 @@ class RollbackEngine:
                 raise
             progress.advance(task)
 
-            progress.update(task, description="[cyan]Validating restored configuration...")
+            progress.update(
+                task, description="[cyan]Validating restored configuration..."
+            )
             time.sleep(0.15)
             progress.advance(task)
 
@@ -1446,9 +1641,7 @@ class RollbackEngine:
     def _interactive_select(
         self, target: Path, backups: List[Path]
     ) -> Optional[Path]:
-        console.print(
-            f"\n[bold]Available backups for {target}:[/bold]"
-        )
+        console.print(f"\n[bold]Available backups for {target}:[/bold]")
         table = Table(box=box.ROUNDED, header_style="bold cyan")
         table.add_column("#", justify="right", style="cyan")
         table.add_column("Timestamp", style="white")
@@ -1464,7 +1657,9 @@ class RollbackEngine:
             table.add_row(str(i), ts, size, mtype)
         console.print(table)
         try:
-            raw = input(f"Select backup to restore [1-{len(backups)}]: ").strip()
+            raw = input(
+                f"Select backup to restore [1-{len(backups)}]: "
+            ).strip()
         except (EOFError, KeyboardInterrupt):
             console.print()
             return None
@@ -1518,13 +1713,13 @@ def render_status() -> None:
 
         for kem in oqs.get_enabled_kem_mechanisms():
             recommended = "[green]✔[/green]" if kem.lower().startswith(
-                ("kyber768", "ml-kem-768")
+                ("kyber768", "ml-kem-768", "mlkem768")
             ) else ""
             table.add_row("KEM", kem, recommended)
 
         for sig in oqs.get_enabled_sig_mechanisms():
             recommended = "[green]✔[/green]" if sig.lower().startswith(
-                ("dilithium3", "ml-dsa-65")
+                ("dilithium3", "ml-dsa-65", "mldsa65")
             ) else ""
             table.add_row("SIG", sig, recommended)
 
@@ -1613,8 +1808,9 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    parser.add_argument("--version", action="store_true", help="Print version and exit.")
-
+    parser.add_argument(
+        "--version", action="store_true", help="Print version and exit."
+    )
     parser.add_argument(
         "--preflight",
         action="store_true",
@@ -1625,7 +1821,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Display system status and available PQC mechanisms.",
     )
-
     parser.add_argument(
         "--simulate",
         action="store_true",
@@ -1646,7 +1841,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to a local legacy private key file (RSA/ECC).",
     )
-
     parser.add_argument(
         "--migrate",
         action="store_true",
@@ -1663,7 +1857,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Preview migration changes without writing to disk.",
     )
-
     parser.add_argument(
         "--rollback",
         action="store_true",
@@ -1675,13 +1868,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Rollback to a specific timestamp (format: YYYYMMDD-HHMMSS).",
     )
-
     parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable verbose output.",
     )
-
     parser.add_argument(
         "--no-color",
         action="store_true",
@@ -1729,7 +1920,6 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         console.print("[red]✗ --migrate requires --config <path>[/red]")
         return 2
 
-    # Warn early if we're likely to hit a permission wall
     if os.geteuid() != 0 and not args.dry_run:
         console.print(
             "[yellow]⚠ Warning: Running without root privileges. "
@@ -1793,6 +1983,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.version:
         console.print(f"QSM v{QSM_VERSION}")
+        console.print(
+            "  Standards : NIST FIPS 203 (ML-KEM) · FIPS 204 (ML-DSA)"
+        )
+        console.print(f"  Python    : {platform.python_version()}")
+        console.print(f"  Platform  : {platform.system()} {platform.release()}")
+        console.print(
+            "  Repo      : https://github.com/soufianecyber/Quantum-Safe-Migration"
+        )
         return 0
 
     print_banner()

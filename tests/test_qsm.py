@@ -20,13 +20,27 @@ from qsm import (  # noqa: E402
 )
 
 
+# ---------------------------------------------------------------------------
+# Hybrid Enforcement — the CORE security invariant
+# ---------------------------------------------------------------------------
 class TestHybridEnforcement:
     def test_pure_pqc_content_is_rejected(self) -> None:
         """Pure PQC (no classical component) must be rejected."""
         migrator = HybridMigrator(dry_run=True)
         with pytest.raises(MigrationError, match="Hybrid enforcement violated"):
             migrator._assert_hybrid_enforced(
-                "# Only PQC: Kyber Dilithium", "nginx"
+                'ssl_conf_command Groups "X25519MLKEM768";\n'
+                'ssl_conf_command SignatureAlgorithms "mldsa65";',
+                "nginx",
+            )
+
+    def test_commented_out_hybrid_is_rejected(self) -> None:
+        """Hybrid markers inside comments must NOT satisfy the guard."""
+        migrator = HybridMigrator(dry_run=True)
+        with pytest.raises(MigrationError, match="Hybrid enforcement violated"):
+            migrator._assert_hybrid_enforced(
+                "# ECDHE-ECDSA\n# X25519\n# ML-KEM-768\n# ML-DSA-65\n",
+                "nginx",
             )
 
     def test_pure_classical_content_is_rejected(self) -> None:
@@ -40,13 +54,13 @@ class TestHybridEnforcement:
             )
 
     def test_hybrid_nginx_content_passes(self) -> None:
-        """Proper hybrid content must pass validation."""
+        """Proper hybrid content (classical + PQC) must pass validation."""
         migrator = HybridMigrator(dry_run=True)
         content = (
             "ssl_ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384';\n"
             "ssl_ecdh_curve 'X25519:prime256v1';\n"
-            'ssl_conf_command Groups "X25519Kyber768Draft00";\n'
-            "dilithium3;"
+            'ssl_conf_command Groups "X25519MLKEM768:X25519:P-256";\n'
+            'ssl_conf_command SignatureAlgorithms "ecdsa_secp256r1_sha256:mldsa65";'
         )
         migrator._assert_hybrid_enforced(content, "nginx")
 
@@ -65,6 +79,9 @@ class TestHybridEnforcement:
             migrator._assert_hybrid_enforced("any content", "apache")
 
 
+# ---------------------------------------------------------------------------
+# Shor's Metrics
+# ---------------------------------------------------------------------------
 class TestShorMetrics:
     def test_rsa_2048_severity(self) -> None:
         sim = QuantumSimulator()
@@ -87,6 +104,9 @@ class TestShorMetrics:
         assert metrics["classical_bits"] == 140
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 class TestHelpers:
     def test_humanize_seconds(self) -> None:
         assert "seconds" in _humanize_duration(30)
@@ -113,6 +133,9 @@ class TestHelpers:
         )
 
 
+# ---------------------------------------------------------------------------
+# Rollback Engine
+# ---------------------------------------------------------------------------
 class TestRollbackEngine:
     def test_no_backups_raises(self, tmp_path: Path) -> None:
         target = tmp_path / "config.conf"

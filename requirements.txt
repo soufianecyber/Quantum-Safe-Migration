@@ -2,5 +2,7 @@
 rich>=13.7.0
 cryptography>=41.0.0
 
-# --- Post-Quantum Cryptography Engine ---
+# --- Post-Quantum Cryptography Engine (optional, required for --migrate) ---
+# Requires liboqs system library. See README §3.2 for build instructions.
+# If you only need --simulate / --dry-run, you can safely remove this line.
 liboqs-python>=0.12.0

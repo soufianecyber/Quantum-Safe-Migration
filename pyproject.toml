@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quantum-safe-migration"
-version = "1.0.0"
-description = "Enterprise post-quantum cryptography migration and auditing toolkit."
+version = "1.0.1"
+description = "A post-quantum cryptography migration toolkit for Nginx and OpenSSH."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -17,15 +17,17 @@ keywords = [
     "cryptography",
     "security",
     "nist",
-    "kyber",
-    "dilithium",
+    "fips-203",
+    "fips-204",
     "ml-kem",
     "ml-dsa",
+    "kyber",
+    "dilithium",
     "hndl",
     "devsecops",
 ]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
